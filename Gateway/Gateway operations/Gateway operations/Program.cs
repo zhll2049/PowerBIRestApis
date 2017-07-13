@@ -30,6 +30,8 @@ namespace ConsoleApplication39
         private static AuthenticationContext authContext = null;
         private static string token = String.Empty;
 
+
+
         static void Main(string[] args)
         {
 
@@ -37,10 +39,15 @@ namespace ConsoleApplication39
             string responseText;
             //This is the targetgatewayName that you'd like to create datasource for
             string targetGatewayName = "wxsqltest01";
-            //This is the targetDataSourceName that you'd like to create 
+            //the datasource name to add to the gateway
             string targetDataSourceName = "MyDataSource";
+            //the user account to add to the gateway
+            string targetUserAccount = "v-yuezhe@microsoft.com";
+
             string gatewayID = "";
             string datasourceID = "";
+
+             
 
 
             #region Get Gateways
@@ -110,6 +117,19 @@ namespace ConsoleApplication39
             }
             #endregion Get data sources
 
+
+            #region Add data source user
+
+            String userInfo=  "{"+
+                                                "\"datasourceAccessRight\": \"Read\", " +
+                                                "\"emailAddress\": \""+ targetUserAccount + "\""+
+                                                 "}" ;
+
+            addDataSourceUsers(gatewayID, datasourceID, userInfo);
+             
+
+            #endregion Add data source user
+
             #region Get data source users
             responseText = getDataSourcesInfo(gatewayID, datasourceID, true);
             respJson = JsonConvert.DeserializeObject<dynamic>(responseText);
@@ -121,11 +141,44 @@ namespace ConsoleApplication39
                 Console.WriteLine("");
             }
             #endregion Get data source users
-
-
+             
             Console.ReadKey();
 
         }
+
+        private static string addDataSourceUsers(string gatewayID, string datasourceID, string userInfo)
+        {
+            string ApiUrl = String.Format("https://api.powerbi.com/v1.0/myorg/gateways/{0}/dataSources/{1}/users", gatewayID, datasourceID);
+
+            HttpWebRequest request = System.Net.WebRequest.Create(ApiUrl) as System.Net.HttpWebRequest;
+            //POST web request to create a datasource.
+            request.KeepAlive = true;
+            request.Method = "POST";
+            request.ContentLength = 0;
+            request.ContentType = "application/json";
+
+            //Add token to the request header
+            request.Headers.Add("Authorization", String.Format("Bearer {0}", token));
+
+
+
+            //POST web request
+            byte[] byteArray = System.Text.Encoding.UTF8.GetBytes(userInfo);
+            request.ContentLength = byteArray.Length;
+
+            //Write JSON byte[] into a Stream
+            using (Stream writer = request.GetRequestStream())
+            {
+                writer.Write(byteArray, 0, byteArray.Length);
+
+                var response = (HttpWebResponse)request.GetResponse();
+
+                Console.WriteLine(string.Format("User is added {0} ", response.StatusCode.ToString()));
+
+                return null;
+            }
+        }
+
 
 
         static HttpWebResponse CreateDatasource(string datasourceName, string gatewayId)
@@ -158,7 +211,7 @@ namespace ConsoleApplication39
                     "\"encryptionAlgorithm\":\"RSA-OAEP\"" +
                     "}}";
 
-            Console.WriteLine(datasourceJson);
+             
 
             //POST web request
             byte[] byteArray = System.Text.Encoding.UTF8.GetBytes(datasourceJson);
@@ -186,7 +239,7 @@ namespace ConsoleApplication39
 
             request.Method = "GET";
             request.Headers.Add("Authorization", String.Format("Bearer {0}", AccessToken()));
-
+//
             HttpWebResponse response2 = request.GetResponse() as System.Net.HttpWebResponse;
 
             string responseText = "bad request";
