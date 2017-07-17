@@ -6,6 +6,7 @@ using System.Text;
 //Install-Package Newtonsoft.Json 
 using Newtonsoft.Json;
 using System.IO;
+using System.Security.Cryptography;
 
 namespace ConsoleApplication39
 {
@@ -178,9 +179,7 @@ namespace ConsoleApplication39
                 return null;
             }
         }
-
-
-
+         
         static HttpWebResponse CreateDatasource(string datasourceName, string gatewayId)
         {
 
@@ -196,6 +195,13 @@ namespace ConsoleApplication39
             //Add token to the request header
             request.Headers.Add("Authorization", String.Format("Bearer {0}", token));
 
+            string username = "sa";
+            string password = "110";
+            string gatewayPublicKeyExponent = "AQAB";
+            string gatewayPublicKeyModulus = "ql9TVfv3X8DE8a2f2//FEbcLw80VOjyufoJyjSfIV03m9V9uF9Ya/chDhkPjrh9nsLw1rY9FdKGqxcFGU76ijpkOJLDjdHDA327Az5lY38kFvwtl0t7h3EJJ8h7gU97jYkkRgjq9MhEAHNrfcw3BPXJSKzSz7KqrqmBipDbOGys=";
+
+            string credentials = AsymmetricKeyEncryptionHelper.EncodeCredentials(username, password, gatewayPublicKeyExponent, gatewayPublicKeyModulus);
+
             //Create dataset JSON for POST request
             string datasourceJson =
                 "{" +
@@ -204,7 +210,7 @@ namespace ConsoleApplication39
                     "\"onPremGatewayRequired\":true," +
                     "\"connectionDetails\":\"{\\\"server\\\":\\\"ericvm2\\\",\\\"database\\\":\\\"testdb2\\\"}\"," +
                     "\"credentialDetails\":{  " +
-                    "\"credentials\":\"pkEnC6VcCxPQibuYZin6nk0HHfiHX9n/3UeFmcA/CDvMVDiJxfGtqv+9mfpFXM886f50Nex+24swH9wDMZVIsmIVN2GN2Dr5ba464Nmw5a7TqQjTR+AjnHAA73Ond69HPGDi6yroHizK/y8HDMR4w/MkNvKmEhGUT8VOPeEJELZ1mjaZQ/spZ9kqjjIKHjR5v4z3egKSc3wvloy9hzrkJKQWlMtcbfz5d5BT3bUSetcSynFwq5AMdgsjyD1r6S4eUcaoOpzFMLBIA9ft8mhqudb9EtVxwAElZwTwPYQ319XQALC9c4N0oo7/iBGnJjFGIFMm/cpS0EWgGZf192oSRg==\"," +
+                    "\"credentials\":\""+ credentials + "\"," +
                     "\"credentialType\":\"Basic\"," +
                     "\"encryptedConnection\":\"Encrypted\"," +
                     "\"privacyLevel\":\"Public\"," +
@@ -331,4 +337,70 @@ namespace ConsoleApplication39
             return token;
         }
     }
+
+    public static class AsymmetricKeyEncryptionHelper
+    {
+
+        private const int SegmentLength = 85;
+        private const int EncryptedLength = 128;
+
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="userName"></param> the datasouce user name
+        /// <param name="password"></param> the datasource password
+        /// <param name="gatewaypublicKeyExponent"></param> gateway publicKey Exponent field, you can get it from the get gateways api response json
+        /// <param name="gatewaypublicKeyModulus"></param> gateway publicKey Modulus field, you can get it from the get gateways api response json
+        /// <returns></returns>
+        public static string EncodeCredentials(string userName, string password, string gatewaypublicKeyExponent, string gatewaypublicKeyModulus)
+        {
+            // using json serializer to handle escape characters in username and password
+            var plainText = string.Format("{{\"credentialData\":[{{\"value\":{0},\"name\":\"username\"}},{{\"value\":{1},\"name\":\"password\"}}]}}", JsonConvert.SerializeObject(userName), JsonConvert.SerializeObject(password));
+            using (RSACryptoServiceProvider rsa = new RSACryptoServiceProvider(EncryptedLength * 8))
+            {
+                var parameters = rsa.ExportParameters(false);
+                parameters.Exponent = Convert.FromBase64String(gatewaypublicKeyExponent);
+                parameters.Modulus = Convert.FromBase64String(gatewaypublicKeyModulus);
+                rsa.ImportParameters(parameters);
+                return Encrypt(plainText, rsa);
+            }
+        }
+
+        private static string Encrypt(string plainText, RSACryptoServiceProvider rsa)
+        {
+            byte[] plainTextArray = Encoding.UTF8.GetBytes(plainText);
+
+            // Split the message into different segments, each segment's length is 85. So the result may be 85,85,85,20.
+            bool hasIncompleteSegment = plainTextArray.Length % SegmentLength != 0;
+
+            int segmentNumber = (!hasIncompleteSegment) ? (plainTextArray.Length / SegmentLength) : ((plainTextArray.Length / SegmentLength) + 1);
+
+            byte[] encryptedData = new byte[segmentNumber * EncryptedLength];
+            int encryptedDataPosition = 0;
+
+            for (var i = 0; i < segmentNumber; i++)
+            {
+                int lengthToCopy;
+
+                if (i == segmentNumber - 1 && hasIncompleteSegment)
+                    lengthToCopy = plainTextArray.Length % SegmentLength;
+                else
+                    lengthToCopy = SegmentLength;
+
+                var segment = new byte[lengthToCopy];
+
+                Array.Copy(plainTextArray, i * SegmentLength, segment, 0, lengthToCopy);
+
+                var segmentEncryptedResult = rsa.Encrypt(segment, true);
+
+                Array.Copy(segmentEncryptedResult, 0, encryptedData, encryptedDataPosition, segmentEncryptedResult.Length);
+
+                encryptedDataPosition += segmentEncryptedResult.Length;
+            }
+
+            return Convert.ToBase64String(encryptedData);
+        }
+    }
+
 }
